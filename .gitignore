@@ -1,0 +1,36 @@
+# 저장소 최상위에서 YYYY-MM-DD로 시작하는 작업 기록 문서
+/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*.md
+
+# Python 캐시
+__pycache__/
+*.pyc
+
+# 가상환경
+venv/
+.venv/
+env/
+
+# VS Code 설정
+.vscode/
+
+# 모델 체크포인트
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+
+# 대용량 모델 디렉터리
+checkpoints/
+weights/
+
+# 생성 결과
+results/
+outputs/
+
+# 임시 파일
+*.log
+*.tmp
+
+# 운영체제 메타데이터
+.DS_Store
+Thumbs.db

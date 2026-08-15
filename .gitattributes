@@ -1,0 +1,2 @@
+# Linux에서 실행할 셸 스크립트의 줄바꿈을 LF로 유지한다.
+*.sh text eol=lf
