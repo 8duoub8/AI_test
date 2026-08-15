@@ -26,6 +26,53 @@ done
 
 mkdir -p "${MODEL_ROOT}" "${MODEL_ROOT}/envs"
 
+find_ca_bundle() {
+    local candidate
+    local variable_name
+
+    for variable_name in SSL_CERT_FILE REQUESTS_CA_BUNDLE CURL_CA_BUNDLE; do
+        candidate="$(printenv "${variable_name}" 2>/dev/null || true)"
+        if [[ -f "${candidate}" ]]; then
+            printf '%s\n' "${candidate}"
+            return
+        fi
+    done
+
+    if command -v python >/dev/null 2>&1; then
+        candidate="$(python -c 'import certifi; print(certifi.where())' 2>/dev/null || true)"
+        if [[ -f "${candidate}" ]]; then
+            printf '%s\n' "${candidate}"
+            return
+        fi
+    fi
+
+    for candidate in \
+        /etc/ssl/certs/ca-certificates.crt \
+        /etc/pki/tls/certs/ca-bundle.crt \
+        /etc/ssl/ca-bundle.pem; do
+        if [[ -f "${candidate}" ]]; then
+            printf '%s\n' "${candidate}"
+            return
+        fi
+    done
+}
+
+CA_BUNDLE="$(find_ca_bundle || true)"
+WGET_TLS_OPTIONS=()
+if [[ -n "${CA_BUNDLE}" ]]; then
+    echo "TLS 인증서 묶음을 사용합니다: ${CA_BUNDLE}"
+    WGET_TLS_OPTIONS=(--ca-certificate="${CA_BUNDLE}")
+    export SSL_CERT_FILE="${CA_BUNDLE}"
+    export REQUESTS_CA_BUNDLE="${CA_BUNDLE}"
+    export CURL_CA_BUNDLE="${CA_BUNDLE}"
+    export GIT_SSL_CAINFO="${CA_BUNDLE}"
+    export PIP_CERT="${CA_BUNDLE}"
+else
+    echo "사용 가능한 TLS 인증서 묶음을 찾지 못했습니다." >&2
+    echo "현재 Python 환경에 certifi를 설치한 뒤 다시 실행하십시오." >&2
+    exit 1
+fi
+
 install_micromamba() {
     local platform
     local tools_dir="${MODEL_ROOT}/.tools"
@@ -44,7 +91,7 @@ install_micromamba() {
 
     mkdir -p "${tools_dir}"
     echo "Conda 계열 명령이 없어 Micromamba를 내려받습니다."
-    wget --progress=dot:giga \
+    wget "${WGET_TLS_OPTIONS[@]}" --progress=dot:giga \
         "https://micro.mamba.pm/api/micromamba/${platform}/latest" \
         -O "${downloaded}"
     mv "${downloaded}" "${archive}"
@@ -138,7 +185,7 @@ download_if_missing() {
         return
     fi
     mkdir -p "$(dirname "${destination}")"
-    wget --progress=dot:giga "${url}" -O "${temporary}"
+    wget "${WGET_TLS_OPTIONS[@]}" --progress=dot:giga "${url}" -O "${temporary}"
     mv "${temporary}" "${destination}"
 }
 
