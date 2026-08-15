@@ -1,8 +1,8 @@
-# sad talker와 latentsync 모델을 다운로드하고 환경을 설정하는 스크립트
-# 실행 명령어: bash scripts/bootstrap_models.sh "$PWD/models"
-
 #!/usr/bin/env bash
 set -euo pipefail
+
+# SadTalker와 LatentSync 모델을 다운로드하고 환경을 설정한다.
+# 실행 명령어: bash scripts/bootstrap_models.sh "$PWD/models"
 
 # Linux GPU 서버에서 실행한다. 첫 번째 인자를 생략하면 프로젝트의 models/를 사용한다.
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,8 +14,10 @@ SADTALKER_REPO="${MODEL_ROOT}/SadTalker"
 LATENTSYNC_REPO="${MODEL_ROOT}/LatentSync"
 SADTALKER_ENV="${MODEL_ROOT}/envs/sadtalker"
 LATENTSYNC_ENV="${MODEL_ROOT}/envs/latentsync"
+MAMBA_ROOT_PREFIX="${MODEL_ROOT}/.micromamba-root"
+export MAMBA_ROOT_PREFIX
 
-for executable in git conda wget; do
+for executable in git wget tar; do
     if ! command -v "${executable}" >/dev/null 2>&1; then
         echo "필수 실행 파일이 없습니다: ${executable}" >&2
         exit 1
@@ -23,6 +25,68 @@ for executable in git conda wget; do
 done
 
 mkdir -p "${MODEL_ROOT}" "${MODEL_ROOT}/envs"
+
+install_micromamba() {
+    local platform
+    local tools_dir="${MODEL_ROOT}/.tools"
+    local archive="${tools_dir}/micromamba.tar.bz2"
+    local downloaded="${archive}.download"
+
+    case "$(uname -m)" in
+        x86_64) platform="linux-64" ;;
+        aarch64|arm64) platform="linux-aarch64" ;;
+        ppc64le) platform="linux-ppc64le" ;;
+        *)
+            echo "지원하지 않는 CPU 아키텍처입니다: $(uname -m)" >&2
+            exit 1
+            ;;
+    esac
+
+    mkdir -p "${tools_dir}"
+    echo "Conda 계열 명령이 없어 Micromamba를 내려받습니다."
+    wget --progress=dot:giga \
+        "https://micro.mamba.pm/api/micromamba/${platform}/latest" \
+        -O "${downloaded}"
+    mv "${downloaded}" "${archive}"
+    tar -xjf "${archive}" -C "${tools_dir}" bin/micromamba
+    mv "${tools_dir}/bin/micromamba" "${tools_dir}/micromamba"
+    rmdir "${tools_dir}/bin"
+    rm -f "${archive}"
+    chmod +x "${tools_dir}/micromamba"
+    ENV_MANAGER="${tools_dir}/micromamba"
+    ENV_MANAGER_KIND="micromamba"
+}
+
+if command -v conda >/dev/null 2>&1; then
+    ENV_MANAGER="$(command -v conda)"
+    ENV_MANAGER_KIND="conda"
+elif command -v micromamba >/dev/null 2>&1; then
+    ENV_MANAGER="$(command -v micromamba)"
+    ENV_MANAGER_KIND="micromamba"
+elif [[ -x "${MODEL_ROOT}/.tools/micromamba" ]]; then
+    ENV_MANAGER="${MODEL_ROOT}/.tools/micromamba"
+    ENV_MANAGER_KIND="micromamba"
+else
+    install_micromamba
+fi
+
+echo "환경 관리자: ${ENV_MANAGER_KIND} (${ENV_MANAGER})"
+
+create_environment() {
+    local prefix="$1"
+    shift
+    "${ENV_MANAGER}" create -y \
+        --override-channels \
+        -c conda-forge \
+        -p "${prefix}" \
+        "$@"
+}
+
+run_in_environment() {
+    local prefix="$1"
+    shift
+    "${ENV_MANAGER}" run -p "${prefix}" "$@"
+}
 
 clone_if_missing() {
     local url="$1"
@@ -52,13 +116,13 @@ clone_if_missing \
     "${LATENTSYNC_REPO}"
 
 if [[ ! -x "${SADTALKER_ENV}/bin/python" ]]; then
-    conda create -y -p "${SADTALKER_ENV}" python=3.8 ffmpeg
-    conda run -p "${SADTALKER_ENV}" python -m pip install \
+    create_environment "${SADTALKER_ENV}" python=3.8 ffmpeg pip
+    run_in_environment "${SADTALKER_ENV}" python -m pip install \
         torch==1.12.1+cu113 \
         torchvision==0.13.1+cu113 \
         torchaudio==0.12.1 \
         --extra-index-url https://download.pytorch.org/whl/cu113
-    conda run -p "${SADTALKER_ENV}" python -m pip install \
+    run_in_environment "${SADTALKER_ENV}" python -m pip install \
         -r "${SADTALKER_REPO}/requirements.txt"
 else
     echo "기존 SadTalker 환경을 사용합니다: ${SADTALKER_ENV}"
@@ -106,8 +170,8 @@ download_if_missing \
     "${SADTALKER_REPO}/gfpgan/weights/parsing_parsenet.pth"
 
 if [[ ! -x "${LATENTSYNC_ENV}/bin/python" ]]; then
-    conda create -y -p "${LATENTSYNC_ENV}" python=3.10.13 ffmpeg
-    conda run -p "${LATENTSYNC_ENV}" python -m pip install \
+    create_environment "${LATENTSYNC_ENV}" python=3.10.13 ffmpeg pip
+    run_in_environment "${LATENTSYNC_ENV}" python -m pip install \
         -r "${LATENTSYNC_REPO}/requirements.txt"
 else
     echo "기존 LatentSync 환경을 사용합니다: ${LATENTSYNC_ENV}"
@@ -115,7 +179,7 @@ fi
 
 if [[ ! -f "${LATENTSYNC_REPO}/checkpoints/latentsync_unet.pt" ]] || \
    [[ ! -f "${LATENTSYNC_REPO}/checkpoints/whisper/tiny.pt" ]]; then
-    conda run -p "${LATENTSYNC_ENV}" python -c \
+    run_in_environment "${LATENTSYNC_ENV}" python -c \
         "import sys; from huggingface_hub import snapshot_download; snapshot_download(repo_id='ByteDance/LatentSync-1.6', local_dir=sys.argv[1], allow_patterns=['latentsync_unet.pt', 'whisper/tiny.pt'])" \
         "${LATENTSYNC_REPO}/checkpoints"
 else

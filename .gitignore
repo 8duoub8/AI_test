@@ -20,12 +20,16 @@ env/
 *.safetensors
 
 # 대용량 모델 디렉터리
+/models/
 checkpoints/
 weights/
 
 # 생성 결과
+/inputs/private/
 results/
 outputs/
+/work/
+/temp/
 
 # 임시 파일
 *.log
